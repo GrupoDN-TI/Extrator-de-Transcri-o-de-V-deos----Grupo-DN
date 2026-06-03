@@ -13,7 +13,8 @@ import {
   Copy, 
   Check, 
   RefreshCw, 
-  HardDrive 
+  HardDrive,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -57,6 +58,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [copiedTranscript, setCopiedTranscript] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
+  const [copiedConcepts, setCopiedConcepts] = useState(false);
 
   // Initialize Auth state on load
   useEffect(() => {
@@ -192,9 +194,14 @@ export default function App() {
     setSelectedDriveFile(null);
   };
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 font-sans selection:bg-zinc-700">
-      <header className="border-b border-zinc-800 bg-[#0a0a0a]/80 backdrop-blur-md sticky top-0 z-10">
+      <div className="print:hidden">
+        <header className="border-b border-zinc-800 bg-[#0a0a0a]/80 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center border border-zinc-700">
@@ -511,34 +518,71 @@ export default function App() {
                     <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded">Processed successfully</span>
                     <h2 className="text-lg font-semibold text-zinc-100 tracking-tight mt-1">{result.title}</h2>
                   </div>
-                  <button
-                    onClick={resetAll}
-                    className="text-xs font-medium text-zinc-400 hover:text-white flex items-center gap-1.5 py-1.5 px-4 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Transcribe New File
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handlePrint}
+                      className="text-xs font-bold text-zinc-950 duration-150 hover:bg-white bg-zinc-100 flex items-center gap-1.5 py-1.5 px-4 rounded-xl cursor-pointer shadow-lg"
+                      title="Save or print this entire report as a PDF"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Export to PDF / Print</span>
+                    </button>
+                    <button
+                      onClick={resetAll}
+                      className="text-xs font-medium text-zinc-400 hover:text-white flex items-center gap-1.5 py-1.5 px-4 bg-zinc-900 border border-zinc-800 hover:border-zinc-700/60 rounded-xl"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Transcribe New</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* Transcript column */}
-                  <div className="lg:col-span-2 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-zinc-400" />
-                        Complete Transcript
-                      </h3>
-                      <button
-                        onClick={() => copyToClipboard(result.transcript, setCopiedTranscript)}
-                        className="text-[11px] font-mono hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:border-zinc-700 px-3 py-1 rounded-lg flex items-center gap-1.5 transition-colors"
-                      >
-                        {copiedTranscript ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copiedTranscript ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 relative min-h-[400px]">
-                      <div className="text-zinc-300 leading-relaxed space-y-4 text-justify text-sm whitespace-pre-wrap">
-                        {result.transcript}
+                  {/* Transcript & Insights column */}
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* Key Concepts Block */}
+                    {result.keyConcepts && result.keyConcepts !== 'Key Concepts not specified.' && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                            <Layout className="w-4 h-4 text-emerald-450" />
+                            Key Concepts & Business Insights
+                          </h3>
+                          <button
+                            onClick={() => copyToClipboard(result.keyConcepts || '', setCopiedConcepts)}
+                            className="text-[11px] font-mono hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:border-zinc-700 px-3 py-1 rounded-lg flex items-center gap-1.5 transition-colors"
+                          >
+                            {copiedConcepts ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedConcepts ? 'Copied' : 'Copy Takeaways'}
+                          </button>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 relative">
+                          <div className="text-zinc-350 leading-relaxed text-xs space-y-3 whitespace-pre-wrap text-justify">
+                            {result.keyConcepts}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Complete Spoken Transcript */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-zinc-400" />
+                          Complete Spoken Transcript
+                        </h3>
+                        <button
+                          onClick={() => copyToClipboard(result.transcript, setCopiedTranscript)}
+                          className="text-[11px] font-mono hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:border-zinc-700 px-3 py-1 rounded-lg flex items-center gap-1.5 transition-colors"
+                        >
+                          {copiedTranscript ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedTranscript ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 relative min-h-[300px]">
+                        <div className="text-zinc-300 leading-relaxed space-y-4 text-justify text-sm whitespace-pre-wrap">
+                          {result.transcript}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -552,12 +596,24 @@ export default function App() {
                           <Layout className="w-4 h-4 text-zinc-500" />
                           Executive Summary
                         </h3>
-                        <button
-                          onClick={() => copyToClipboard(result.summary, setCopiedSummary)}
-                          className="text-[10px] text-zinc-400 hover:text-zinc-200"
-                        >
-                          {copiedSummary ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
+                        <div className="flex items-center gap-2 print:hidden">
+                          <button
+                            onClick={handlePrint}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 bg-zinc-800/40 hover:bg-zinc-800/80 px-2.5 py-1 rounded transition-all cursor-pointer font-medium"
+                            title="Print complete report dossier"
+                          >
+                            <Printer className="w-3 h-3" />
+                            <span>Print</span>
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(result.summary, setCopiedSummary)}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 bg-zinc-800/40 hover:bg-zinc-800/80 px-2.5 py-1 rounded transition-all cursor-pointer font-medium"
+                            title="Copy Executive Summary text"
+                          >
+                            {copiedSummary ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedSummary ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
                       </div>
                       <p className="text-xs text-zinc-300 leading-relaxed text-justify">
                         {result.summary}
@@ -611,6 +667,73 @@ export default function App() {
           </div>
         </div>
       </footer>
+      </div>
+
+      {/* Pristine Print-Only Report Layout */}
+      {result && (
+        <div className="hidden print:block text-black bg-white p-8 max-w-4xl mx-auto font-sans">
+          <div className="border-b-2 border-zinc-900 pb-4 mb-6">
+            <h1 className="text-2xl font-extrabold tracking-tight text-neutral-950 leading-tight">
+              {result.title}
+            </h1>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px] text-neutral-500 mt-4 border-t border-neutral-200 pt-3 font-mono">
+              <div>
+                <span className="font-bold text-neutral-700">Document Type:</span> Transcription Dossier
+              </div>
+              <div>
+                <span className="font-bold text-neutral-700">Source:</span> <span className="capitalize">{mode}</span>
+              </div>
+              {mode === 'url' && (
+                <div className="truncate max-w-[350px]">
+                  <span className="font-bold text-neutral-700">Target URL:</span> {url}
+                </div>
+              )}
+              {mode === 'local' && localFile && (
+                <div>
+                  <span className="font-bold text-neutral-700">File Name:</span> {localFile.name}
+                </div>
+              )}
+              {mode === 'drive' && selectedDriveFile && (
+                <div>
+                  <span className="font-bold text-neutral-700">Drive File:</span> {selectedDriveFile.name}
+                </div>
+              )}
+              <div>
+                <span className="font-bold text-neutral-700">Date Generated:</span> {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-8 avoid-break">
+            <h2 className="text-xs font-bold text-neutral-900 uppercase tracking-widest border-b-2 border-neutral-300 pb-1 mb-3">
+              Executive Summary
+            </h2>
+            <div className="text-neutral-850 leading-relaxed text-sm text-justify whitespace-pre-wrap font-sans">
+              {result.summary}
+            </div>
+          </div>
+
+          {result.keyConcepts && result.keyConcepts !== 'Key Concepts not specified.' && (
+            <div className="mb-8 avoid-break">
+              <h2 className="text-xs font-bold text-neutral-900 uppercase tracking-widest border-b-2 border-neutral-300 pb-1 mb-3">
+                Key Takeaways & Concepts
+              </h2>
+              <div className="text-neutral-850 leading-relaxed text-sm text-justify whitespace-pre-wrap font-sans">
+                {result.keyConcepts}
+              </div>
+            </div>
+          )}
+
+          <div className="avoid-break pt-4">
+            <h2 className="text-xs font-bold text-neutral-900 uppercase tracking-widest border-b-2 border-neutral-300 pb-1 mb-3">
+              Complete Transcription
+            </h2>
+            <div className="text-neutral-850 leading-relaxed text-sm text-justify whitespace-pre-wrap font-sans">
+              {result.transcript}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ export interface TranscriptionResult {
   transcript: string;
   summary: string;
   title: string;
+  keyConcepts?: string;
 }
 
 // 1. Transcribe online URL (WEF / YouTube)
