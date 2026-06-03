@@ -55,57 +55,6 @@ export async function waitForFileActive(fileRef: { name: string }) {
   return fileState;
 }
 
-// Helper to call Gemini with retry attempts and exponential/fixed delays
-async function callGeminiWithRetry(
-  model: string,
-  contents: any,
-  config: any,
-  retries = 3,
-  delay = 1000
-): Promise<any> {
-  let attempt = 0;
-  while (attempt < retries) {
-    try {
-      return await ai.models.generateContent({
-        model,
-        contents,
-        config,
-      });
-    } catch (error) {
-      attempt++;
-      if (attempt >= retries) {
-        throw error;
-      }
-      console.warn(`[GEMINI RETRY] Attempt ${attempt} failed:`, error, `Retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-}
-
-// Fallback logic to robustly switch models in case of limits or errors
-async function generateWithFallback(
-  contents: any,
-  config: any,
-  primaryModel = "gemini-3.1-pro-preview",
-  fallbackModelName = "gemini-1.5-flash"
-): Promise<any> {
-  try {
-    return await callGeminiWithRetry(primaryModel, contents, config, 3, 1000);
-  } catch (error) {
-    console.warn(`[GEMINI FALLBACK] Primary model (${primaryModel}) failed. Switching to fallback (${fallbackModelName})...`, error);
-    try {
-      return await ai.models.generateContent({
-        model: fallbackModelName,
-        contents,
-        config,
-      });
-    } catch (fallbackError) {
-      console.error("[GEMINI FALLBACK] Fallback model also failed:", fallbackError);
-      throw fallbackError;
-    }
-  }
-}
-
 // Generate structured response using the JSON schema
 export async function generateStructuredTranscription(
   fileRef: any,
@@ -118,18 +67,17 @@ export async function generateStructuredTranscription(
     3. Exclude any non-relevant commentary.
   `;
 
-  const response = await generateWithFallback(
-    [
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-pro-preview",
+    contents: [
       fileRef,
       { text: prompt }
     ],
-    {
+    config: {
       responseMimeType: "application/json",
       responseSchema: transcriptionSchema,
     },
-    "gemini-3.1-pro-preview",
-    "gemini-1.5-flash"
-  );
+  });
 
   const responseText = response.text || "{}";
   const parsed = JSON.parse(responseText.trim());
@@ -180,12 +128,11 @@ export async function generateStructuredUrlTranscription(
     config.tools = [{ googleSearch: {} }];
   }
 
-  const response = await generateWithFallback(
-    prompt,
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-pro-preview",
+    contents: prompt,
     config,
-    "gemini-3.1-pro-preview",
-    "gemini-1.5-flash"
-  );
+  });
 
   const responseText = response.text || "{}";
   const parsed = JSON.parse(responseText.trim());
