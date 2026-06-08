@@ -16,6 +16,7 @@ interface ResultsDashboardProps {
   url: string;
   resetAll: () => void;
   onPrint: () => void;
+  onDownloadPdf: () => void;
   copyToClipboard: (text: string, setCopied: (v: boolean) => void) => Promise<void>;
   copiedTranscript: boolean;
   setCopiedTranscript: (v: boolean) => void;
@@ -31,6 +32,7 @@ export default function ResultsDashboard({
   url,
   resetAll,
   onPrint,
+  onDownloadPdf,
   copyToClipboard,
   copiedTranscript,
   setCopiedTranscript,
@@ -43,19 +45,43 @@ export default function ResultsDashboard({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
         <div>
-          <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded">
-            Processed successfully
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-widest bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded">
+              Processed successfully
+            </span>
+            {result.cachedAt && (
+              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-900 px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
+                ⚡ Instant Cache Hit
+              </span>
+            )}
+            {result.modelUsed && (
+              <span className={`text-[9px] font-mono px-2 py-0.5 rounded border ${
+                result.modelUsed === 'gemini-2.5-flash' 
+                  ? 'text-amber-400 bg-amber-950/40 border-amber-900' 
+                  : 'text-zinc-400 bg-zinc-900 border-zinc-800'
+              }`}>
+                Model: {result.modelUsed} {result.modelUsed === 'gemini-2.5-flash' ? '(Graceful Fallback)' : ''}
+              </span>
+            )}
+          </div>
           <h2 className="text-lg font-semibold text-zinc-100 tracking-tight mt-1">{result.title}</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onPrint}
             className="text-xs font-bold text-zinc-950 duration-150 hover:bg-white bg-zinc-100 flex items-center gap-1.5 py-1.5 px-4 rounded-xl cursor-pointer shadow-lg"
-            title="Save or print this entire report as a PDF"
+            title="Print this report"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>Export to PDF / Print</span>
+            <span>Print</span>
+          </button>
+          <button
+            onClick={onDownloadPdf}
+            className="text-xs font-bold text-white duration-150 hover:bg-emerald-600 bg-emerald-700 flex items-center gap-1.5 py-1.5 px-4 rounded-xl cursor-pointer shadow-lg"
+            title="Download report as PDF"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Download PDF</span>
           </button>
           <button
             onClick={resetAll}

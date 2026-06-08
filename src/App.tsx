@@ -47,6 +47,7 @@ export default function App() {
     copyToClipboard,
     resetAll,
     handlePrint,
+    handleDownloadPdf,
   } = useTranscription();
 
   return (
@@ -301,6 +302,7 @@ export default function App() {
                     url={url}
                     resetAll={resetAll}
                     onPrint={handlePrint}
+                    onDownloadPdf={handleDownloadPdf}
                     copyToClipboard={copyToClipboard}
                     copiedTranscript={copiedTranscript}
                     setCopiedTranscript={setCopiedTranscript}
@@ -332,7 +334,7 @@ export default function App() {
 
       {/* Pristine Print-Only Report Layout */}
       {result && (
-        <div className="hidden print:block text-black bg-white p-8 max-w-4xl mx-auto font-sans">
+        <div id="printable-content" className="hidden print:block text-black bg-white p-8 max-w-4xl mx-auto font-sans">
           <div className="border-b-2 border-zinc-900 pb-4 mb-6">
             <h1 className="text-2xl font-extrabold tracking-tight text-neutral-950 leading-tight">
               {result.title}

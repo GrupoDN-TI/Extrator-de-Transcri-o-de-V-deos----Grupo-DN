@@ -1,4 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import fs from "fs";
+import path from "path";
 
 // Initialize Gemini client with proper configuration and User-Agent telemetry
 export const ai = new GoogleGenAI({
@@ -9,6 +11,78 @@ export const ai = new GoogleGenAI({
     },
   },
 });
+
+// Cache implementation for Idempotency
+const CACHE_FILE_PATH = path.join("/tmp", "video_transcriber_cache.json");
+
+export interface TranscriptionRecord {
+  title: string;
+  summary: string;
+  keyConcepts: string;
+  transcript: string;
+  modelUsed?: string;
+  cachedAt?: number;
+}
+
+interface CacheStore {
+  [key: string]: TranscriptionRecord;
+}
+
+// Safely load persistent cache from temp disk
+function loadCacheFromDisk(): CacheStore {
+  try {
+    if (fs.existsSync(CACHE_FILE_PATH)) {
+      const raw = fs.readFileSync(CACHE_FILE_PATH, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("[Cache] Warmup error reading cache disk storage:", err);
+  }
+  return {};
+}
+
+// Safely write persistent cache state to temp disk
+function saveCacheToDisk(store: CacheStore) {
+  try {
+    const dir = path.dirname(CACHE_FILE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(store, null, 2), "utf8");
+  } catch (err) {
+    console.error("[Cache] Write err while serializing cache state to disk:", err);
+  }
+}
+
+// Local runtime dictionary
+const memoryCache: CacheStore = loadCacheFromDisk();
+
+/**
+ * Checks cache for existing transcription to guarantee idempotency.
+ * @param key unique lookup key (url code, local file fingerprint, google drive ID)
+ */
+export function getCachedResult(key: string): TranscriptionRecord | null {
+  const normKey = key.trim().toLowerCase();
+  const hit = memoryCache[normKey];
+  if (hit) {
+    console.log(`[Idempotency Cache HIT] Instant return for key query: "${key}"`);
+    return hit;
+  }
+  return null;
+}
+
+/**
+ * Saves analysis outcomes in persistent Cache.
+ */
+export function persistResultToCache(key: string, record: TranscriptionRecord) {
+  const normKey = key.trim().toLowerCase();
+  memoryCache[normKey] = {
+    ...record,
+    cachedAt: Date.now(),
+  };
+  saveCacheToDisk(memoryCache);
+  console.log(`[Idempotency Cache SAVE] Persisted outcome for key query: "${key}"`);
+}
 
 // JSON Schema for structured transcription output to ensure 100% valid JSON
 export const transcriptionSchema = {
@@ -55,6 +129,58 @@ export async function waitForFileActive(fileRef: { name: string }) {
   return fileState;
 }
 
+/**
+ * Executes a Gemini content generation request with automatic fallback redirection.
+ * Primary model: gemini-3.1-pro-preview (premium, smaller quota in free tier)
+ * Fallback model: gemini-2.5-flash (extremely resilient, higher quota / lower limits)
+ */
+async function callGeminiWithFallback(params: {
+  contents: any;
+  config: any;
+}): Promise<{ responseText: string; modelUsed: string }> {
+  const primaryModel = "gemini-3.1-pro-preview";
+  const fallbackModel = "gemini-2.5-flash";
+
+  try {
+    console.log(`[Gemini API] Dispatching query to primary model: "${primaryModel}"`);
+    const response = await ai.models.generateContent({
+      model: primaryModel,
+      contents: params.contents,
+      config: params.config,
+    });
+    return {
+      responseText: response.text || "{}",
+      modelUsed: primaryModel,
+    };
+  } catch (error: any) {
+    const errorMsg = String(error?.message || error || "");
+    const isQuotaError =
+      errorMsg.includes("429") ||
+      errorMsg.includes("quota") ||
+      errorMsg.includes("RESOURCE_EXHAUSTED") ||
+      errorMsg.includes("limit") ||
+      errorMsg.includes("exhausted");
+
+    console.warn(`[Gemini API Warning] Primary Model "${primaryModel}" failed. reason: ${isQuotaError ? "Quota Limit (429)" : "Unknown issue"}. Details: ${errorMsg}`);
+    console.log(`[Gemini API Fallback] Overriding and redirecting request to: "${fallbackModel}" to recover gracefully.`);
+
+    try {
+      const response = await ai.models.generateContent({
+        model: fallbackModel,
+        contents: params.contents,
+        config: params.config,
+      });
+      return {
+        responseText: response.text || "{}",
+        modelUsed: fallbackModel,
+      };
+    } catch (fallbackError: any) {
+      console.error(`[Gemini API Critical] Both primary (${primaryModel}) and fallback (${fallbackModel}) models failed!`);
+      throw fallbackError;
+    }
+  }
+}
+
 // Generate structured response using the JSON schema
 export async function generateStructuredTranscription(
   fileRef: any,
@@ -67,8 +193,7 @@ export async function generateStructuredTranscription(
     3. Exclude any non-relevant commentary.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+  const { responseText, modelUsed } = await callGeminiWithFallback({
     contents: [
       fileRef,
       { text: prompt }
@@ -79,7 +204,6 @@ export async function generateStructuredTranscription(
     },
   });
 
-  const responseText = response.text || "{}";
   const parsed = JSON.parse(responseText.trim());
 
   // Format array of keyConcepts into a single unified markdown bullet string
@@ -98,6 +222,7 @@ export async function generateStructuredTranscription(
     summary: parsed.summary || "Summary not specified.",
     keyConcepts: formattedConcepts,
     transcript: parsed.transcript || "Transcript not specified.",
+    modelUsed,
   };
 }
 
@@ -128,13 +253,11 @@ export async function generateStructuredUrlTranscription(
     config.tools = [{ googleSearch: {} }];
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+  const { responseText, modelUsed } = await callGeminiWithFallback({
     contents: prompt,
     config,
   });
 
-  const responseText = response.text || "{}";
   const parsed = JSON.parse(responseText.trim());
 
   const formattedConcepts = Array.isArray(parsed.keyConcepts)
@@ -152,5 +275,6 @@ export async function generateStructuredUrlTranscription(
     summary: parsed.summary || "Summary not specified.",
     keyConcepts: formattedConcepts,
     transcript: parsed.transcript || "Transcript not specified.",
+    modelUsed,
   };
 }

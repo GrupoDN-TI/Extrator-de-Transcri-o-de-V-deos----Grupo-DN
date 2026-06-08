@@ -9,6 +9,8 @@ import {
   waitForFileActive,
   generateStructuredTranscription,
   generateStructuredUrlTranscription,
+  getCachedResult,
+  persistResultToCache,
 } from "../services/geminiService";
 
 // Helper function to extract YouTube video ID
@@ -18,7 +20,7 @@ function getYouTubeId(url: string): string | null {
   return match && match[2].length === 11 ? match[2] : null;
 }
 
-// Controller: Transcribe a local file
+// Controller: Transcribe a local file with cache lookup
 export async function transcribeLocal(req: Request, res: Response) {
   if (!req.file) {
     return res.status(400).json({ error: "No video file was uploaded." });
@@ -26,20 +28,45 @@ export async function transcribeLocal(req: Request, res: Response) {
 
   const filePath = req.file.path;
   const mimeType = req.file.mimetype;
+  const originalName = req.file.originalname;
+  const size = req.file.size;
+
+  // 1. Generate Idempotency Cache Fingerprint
+  const cacheKey = `local_file:${originalName}_size:${size}`;
+  const cacheHit = getCachedResult(cacheKey);
+  
+  if (cacheHit) {
+    console.log(`[Idempotency API HIT] local file "${originalName}" served natively from cache.`);
+    
+    // Safely delete the temporary uploaded file immediately to prevent disk space leaks
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        console.error("Cleanup error for cached local file upload:", err);
+      }
+    }
+    return res.json(cacheHit);
+  }
+
   let uploadResult: any = null;
 
   try {
-    // 1. Upload local file to Gemini Files API
+    // 2. Upload local file to Gemini Files API
     uploadResult = await ai.files.upload({
       file: filePath,
       mimeType: mimeType,
     } as any);
 
-    // 2. Poll until state becomes ACTIVE
+    // 3. Poll until state becomes ACTIVE
     await waitForFileActive(uploadResult);
 
-    // 3. Generate structured content
-    const parsed = await generateStructuredTranscription(uploadResult, req.file.originalname);
+    // 4. Generate structured content
+    const parsed = await generateStructuredTranscription(uploadResult, originalName);
+    
+    // 5. Cache the outcome to promise future idempotency
+    persistResultToCache(cacheKey, parsed);
+
     return res.json(parsed);
 
   } catch (error: any) {
@@ -65,7 +92,7 @@ export async function transcribeLocal(req: Request, res: Response) {
   }
 }
 
-// Controller: Transcribe a Google Drive file
+// Controller: Transcribe a Google Drive file with cache lookup
 export async function transcribeDrive(req: Request, res: Response) {
   const { fileId, accessToken, fileName, mimeType } = req.body;
 
@@ -73,11 +100,20 @@ export async function transcribeDrive(req: Request, res: Response) {
     return res.status(400).json({ error: "File ID and Access Token are required." });
   }
 
+  // 1. Generate Idempotency Cache Fingerprint
+  const cacheKey = `drive_file:${fileId}`;
+  const cacheHit = getCachedResult(cacheKey);
+  
+  if (cacheHit) {
+    console.log(`[Idempotency API HIT] drive file "${fileId}" (${fileName || 'unnamed'}) served instantly from cache.`);
+    return res.json(cacheHit);
+  }
+
   const tempFilePath = `/tmp/drive_${fileId}`;
   let uploadResult: any = null;
 
   try {
-    // 1. Fetch file stream from Google Drive API
+    // 2. Fetch file stream from Google Drive API
     const driveRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -92,21 +128,25 @@ export async function transcribeDrive(req: Request, res: Response) {
       throw new Error("No download stream returned from Google Drive.");
     }
 
-    // 2. Stream to a temporary file locally directly to disk without RAM overload
+    // 3. Stream to a temporary file locally directly to disk without RAM overload
     const nodeReadable = Readable.fromWeb(driveRes.body as any);
     await pipeline(nodeReadable, createWriteStream(tempFilePath));
 
-    // 3. Upload to Gemini Files API
+    // 4. Upload to Gemini Files API
     uploadResult = await ai.files.upload({
       file: tempFilePath,
       mimeType: mimeType || "video/mp4",
     } as any);
 
-    // 4. Poll until state is ACTIVE
+    // 5. Poll until state is ACTIVE
     await waitForFileActive(uploadResult);
 
-    // 5. Generate structured content
+    // 6. Generate structured content
     const parsed = await generateStructuredTranscription(uploadResult, fileName || "Google Drive File");
+    
+    // 7. Save to cache
+    persistResultToCache(cacheKey, parsed);
+
     return res.json(parsed);
 
   } catch (error: any) {
@@ -132,11 +172,20 @@ export async function transcribeDrive(req: Request, res: Response) {
   }
 }
 
-// Controller: Transcribe content by URL
+// Controller: Transcribe content by URL with cache lookup
 export async function transcribeUrl(req: Request, res: Response) {
   const { url } = req.body;
   if (!url) {
     return res.status(400).json({ error: "URL is required" });
+  }
+
+  // 1. Generate Idempotency Cache Fingerprint
+  const cacheKey = `url:${url}`;
+  const cacheHit = getCachedResult(cacheKey);
+  
+  if (cacheHit) {
+    console.log(`[Idempotency API HIT] URL target "${url}" served instantly from cache database.`);
+    return res.json(cacheHit);
   }
 
   // Check if YouTube video URL
@@ -154,6 +203,10 @@ export async function transcribeUrl(req: Request, res: Response) {
       if (parsed.transcript.length < 50) {
         parsed.transcript = plainTranscript;
       }
+      
+      // Cache subtitles-based generation
+      persistResultToCache(cacheKey, parsed);
+
       return res.json(parsed);
     } catch (ytError: any) {
       console.warn("Native YouTube transcript fetch failed. Falling back to Search grounding:", ytError);
@@ -163,6 +216,10 @@ export async function transcribeUrl(req: Request, res: Response) {
   // Fallback / Standard URL parsing path using Search grounding
   try {
     const parsed = await generateStructuredUrlTranscription("", url, "Video Transcription");
+    
+    // Cache search-grounded generation
+    persistResultToCache(cacheKey, parsed);
+
     return res.json(parsed);
   } catch (error: any) {
     console.error("Transcription URL error:", error);
